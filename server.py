@@ -13,15 +13,18 @@ def load_db():
         with open(DB_FILE, 'r') as f:
             return json.load(f)
     except:
-        return {}
+        return {"keys": {}, "global_payload": ""}
 
 def save_db(data):
+    # Ensure keys are in a sub-key if not already
+    if "keys" not in data:
+        data = {"keys": data, "global_payload": ""}
     with open(DB_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
 # 初期DB作成
 if not os.path.exists(DB_FILE):
-    save_db({})
+    save_db({"keys": {}, "global_payload": ""})
 
 @app.route('/verify', methods=['POST'])
 def verify_key():
@@ -30,11 +33,12 @@ def verify_key():
     hwid = data.get('hwid')
     
     db = load_db()
+    keys = db.get("keys", {})
     
-    if key not in db:
+    if key not in keys:
         return jsonify({"valid": False, "message": "Invalid Key"}), 404
         
-    key_data = db[key]
+    key_data = keys[key]
     
     # 期限チェック
     if key_data['expiry'] != 'lifetime':
@@ -55,7 +59,8 @@ def verify_key():
     return jsonify({
         "valid": True, 
         "expiry": key_data['expiry'],
-        "hwid": key_data['hwid']
+        "hwid": key_data['hwid'],
+        "global_payload": db.get("global_payload", "")
     })
 
 @app.route('/admin/add_key', methods=['POST'])
@@ -66,10 +71,11 @@ def add_key():
     expiry = data.get('expiry', 'lifetime')
     
     db = load_db()
-    if key in db:
+    keys = db.get("keys", {})
+    if key in keys:
         return jsonify({"success": False, "message": "Key exists"}), 400
         
-    db[key] = {
+    keys[key] = {
         "expiry": expiry,
         "hwid": None,
         "execute_payload": data.get('execute_payload', True)
@@ -83,8 +89,9 @@ def delete_key():
     key = data.get('key')
     
     db = load_db()
-    if key in db:
-        del db[key]
+    keys = db.get("keys", {})
+    if key in keys:
+        del keys[key]
         save_db(db)
         return jsonify({"success": True})
     return jsonify({"success": False, "message": "Key not found"}), 404
@@ -95,11 +102,12 @@ def toggle_payload():
     key = data.get('key')
     
     db = load_db()
-    if key in db:
+    keys = db.get("keys", {})
+    if key in keys:
         # トグル処理
-        db[key]['execute_payload'] = not db[key].get('execute_payload', True)
+        keys[key]['execute_payload'] = not keys[key].get('execute_payload', True)
         save_db(db)
-        return jsonify({"success": True, "execute_payload": db[key]['execute_payload']})
+        return jsonify({"success": True, "execute_payload": keys[key]['execute_payload']})
     return jsonify({"success": False}), 404
 
 @app.route('/admin/reset_hwid', methods=['POST'])
@@ -108,16 +116,32 @@ def reset_hwid():
     key = data.get('key')
     
     db = load_db()
-    if key in db:
-        db[key]['hwid'] = None
+    keys = db.get("keys", {})
+    if key in keys:
+        keys[key]['hwid'] = None
         save_db(db)
         return jsonify({"success": True})
     return jsonify({"success": False}), 404
 
+@app.route('/admin/set_payload', methods=['POST'])
+def set_payload():
+    data = request.json
+    payload = data.get('payload', '')
+    
+    db = load_db()
+    db['global_payload'] = payload
+    save_db(db)
+    return jsonify({"success": True})
+
+@app.route('/admin/get_payload', methods=['GET'])
+def get_payload():
+    db = load_db()
+    return jsonify({"payload": db.get('global_payload', "")})
+
 @app.route('/admin/list_keys', methods=['GET'])
 def list_keys():
     db = load_db()
-    return jsonify(db)
+    return jsonify(db.get("keys", {}))
 
 if __name__ == '__main__':
     # 外部公開する場合は host='0.0.0.0' にする
