@@ -71,7 +71,8 @@ def add_key():
         
     db[key] = {
         "expiry": expiry,
-        "hwid": None
+        "hwid": None,
+        "execute_payload": data.get('execute_payload', True)
     }
     save_db(db)
     return jsonify({"success": True, "message": "Key added"})
@@ -87,6 +88,19 @@ def delete_key():
         save_db(db)
         return jsonify({"success": True})
     return jsonify({"success": False, "message": "Key not found"}), 404
+
+@app.route('/admin/toggle_payload', methods=['POST'])
+def toggle_payload():
+    data = request.json
+    key = data.get('key')
+    
+    db = load_db()
+    if key in db:
+        # トグル処理
+        db[key]['execute_payload'] = not db[key].get('execute_payload', True)
+        save_db(db)
+        return jsonify({"success": True, "execute_payload": db[key]['execute_payload']})
+    return jsonify({"success": False}), 404
 
 @app.route('/admin/reset_hwid', methods=['POST'])
 def reset_hwid():
