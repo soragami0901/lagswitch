@@ -53,91 +53,117 @@ def get_settings():
 
 @app.route('/verify', methods=['POST'])
 def verify_key():
-    data = request.json
-    key = data.get('key')
-    hwid = data.get('hwid')
-    
-    key_data = keys_coll.find_one({"key": key})
-    
-    if not key_data:
-        return jsonify({"valid": False, "message": "Invalid Key"}), 404
+    try:
+        data = request.json
+        key = data.get('key')
+        hwid = data.get('hwid')
         
-    # 期限チェック
-    if key_data['expiry'] != 'lifetime':
-        try:
-            exp_date = datetime.datetime.fromisoformat(key_data['expiry'])
-            if datetime.datetime.now() > exp_date:
-                return jsonify({"valid": False, "message": "Expired"}), 403
-        except:
-            pass
+        if not key:
+            return jsonify({"valid": False, "message": "Key missing"}), 400
+
+        key_data = keys_coll.find_one({"key": key})
+        
+        if not key_data:
+            return jsonify({"valid": False, "message": "Invalid Key"}), 404
             
-    # HWIDチェック
-    hwid_limit = key_data.get('hwid_limit', 1)
-    
-    if hwid_limit == 'unlimited':
-        pass
-    elif key_data.get('hwid') is None or key_data.get('hwid') == "":
-        # 初回登録
-        keys_coll.update_one({"key": key}, {"$set": {"hwid": hwid}})
-    elif key_data['hwid'] != hwid:
-        return jsonify({"valid": False, "message": "HWID Mismatch"}), 403
+        # 期限チェック
+        if key_data.get('expiry') != 'lifetime':
+            try:
+                exp_date = datetime.datetime.fromisoformat(key_data['expiry'])
+                if datetime.datetime.now() > exp_date:
+                    return jsonify({"valid": False, "message": "Expired"}), 403
+            except:
+                pass
+                
+        # HWIDチェック
+        hwid_limit = key_data.get('hwid_limit', 1)
         
-    return jsonify({
-        "valid": True, 
-        "expiry": key_data['expiry'],
-        "hwid": key_data.get('hwid', 'unlimited')
-    })
+        if hwid_limit == 'unlimited':
+            pass
+        elif key_data.get('hwid') is None or key_data.get('hwid') == "":
+            # 初回登録
+            keys_coll.update_one({"key": key}, {"$set": {"hwid": hwid}})
+        elif key_data['hwid'] != hwid:
+            return jsonify({"valid": False, "message": "HWID Mismatch"}), 403
+            
+        return jsonify({
+            "valid": True, 
+            "expiry": key_data['expiry'],
+            "hwid": key_data.get('hwid', 'unlimited')
+        })
+    except Exception as e:
+        print(f"Error in verify_key: {e}")
+        return jsonify({"valid": False, "message": f"Server DB Error: {str(e)}"}), 500
 
 @app.route('/admin/add_key', methods=['POST'])
 def add_key():
-    data = request.json
-    key = data.get('key')
-    expiry = data.get('expiry', 'lifetime')
-    hwid_limit = data.get('hwid_limit', 1)
-    
-    if keys_coll.find_one({"key": key}):
-        return jsonify({"success": False, "message": "Key exists"}), 400
-    
-    keys_coll.insert_one({
-        "key": key,
-        "expiry": expiry,
-        "hwid": None,
-        "hwid_limit": hwid_limit,
-        "created_at": datetime.datetime.now().isoformat()
-    })
-    return jsonify({"success": True, "message": "Key added"})
+    try:
+        data = request.json
+        key = data.get('key')
+        expiry = data.get('expiry', 'lifetime')
+        hwid_limit = data.get('hwid_limit', 1)
+        
+        if not key:
+            return jsonify({"success": False, "message": "Key name required"}), 400
+
+        if keys_coll.find_one({"key": key}):
+            return jsonify({"success": False, "message": "Key exists"}), 400
+        
+        keys_coll.insert_one({
+            "key": key,
+            "expiry": expiry,
+            "hwid": None,
+            "hwid_limit": hwid_limit,
+            "created_at": datetime.datetime.now().isoformat()
+        })
+        return jsonify({"success": True, "message": "Key added"})
+    except Exception as e:
+        print(f"Error in add_key: {e}")
+        return jsonify({"success": False, "message": f"Database Error: {str(e)}"}), 500
 
 @app.route('/admin/delete_key', methods=['POST'])
 def delete_key():
-    data = request.json
-    key = data.get('key')
-    
-    result = keys_coll.delete_one({"key": key})
-    if result.deleted_count > 0:
-        return jsonify({"success": True})
-    return jsonify({"success": False, "message": "Key not found"}), 404
+    try:
+        data = request.json
+        key = data.get('key')
+        
+        result = keys_coll.delete_one({"key": key})
+        if result.deleted_count > 0:
+            return jsonify({"success": True})
+        return jsonify({"success": False, "message": "Key not found"}), 404
+    except Exception as e:
+        print(f"Error in delete_key: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/admin/reset_hwid', methods=['POST'])
 def reset_hwid():
-    data = request.json
-    key = data.get('key')
-    
-    result = keys_coll.update_one({"key": key}, {"$set": {"hwid": None}})
-    if result.matched_count > 0:
-        return jsonify({"success": True})
-    return jsonify({"success": False}), 404
+    try:
+        data = request.json
+        key = data.get('key')
+        
+        result = keys_coll.update_one({"key": key}, {"$set": {"hwid": None}})
+        if result.matched_count > 0:
+            return jsonify({"success": True})
+        return jsonify({"success": False}), 404
+    except Exception as e:
+        print(f"Error in reset_hwid: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/admin/list_keys', methods=['GET'])
 def list_keys():
-    # 全キーを辞書形式で返す（既存のクライアントとの互換性のため）
-    keys = {}
-    for k in keys_coll.find():
-        keys[k['key']] = {
-            "expiry": k['expiry'],
-            "hwid": k.get('hwid'),
-            "hwid_limit": k.get('hwid_limit', 1)
-        }
-    return jsonify(keys)
+    try:
+        # 全キーを辞書形式で返す（既存のクライアントとの互換性のため）
+        keys = {}
+        for k in keys_coll.find():
+            keys[k['key']] = {
+                "expiry": k['expiry'],
+                "hwid": k.get('hwid'),
+                "hwid_limit": k.get('hwid_limit', 1)
+            }
+        return jsonify(keys)
+    except Exception as e:
+        print(f"Error in list_keys: {e}")
+        return jsonify({}), 500
 
 @app.route('/version', methods=['GET'])
 def get_version():
