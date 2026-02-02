@@ -1,8 +1,12 @@
-from flask import Flask, request, jsonify
 import json
 import os
 import datetime
+import base64
+from flask import Flask, request, jsonify, Response
 from pymongo import MongoClient
+from gridfs import GridFS
+from flask_cors import CORS
+from bson import ObjectId
 
 app = Flask(__name__)
 
@@ -21,6 +25,7 @@ else:
 db = client['lag_switch_pro']
 keys_coll = db['keys']
 settings_coll = db['settings']
+fs = GridFS(db)
 
 def check_db_connection():
     """DB接続を確認（API呼び出し時に随時使用）"""
@@ -182,7 +187,8 @@ def set_version():
     download_url = data.get('download_url')
     release_notes = data.get('release_notes', '')
     force_update = data.get('force_update', False)
-    code_content = data.get('code_content')
+    code_content = data.get('code_content') # This is base64
+    filename = data.get('filename', 'lag_switch.py')
 
     if not version_number:
         return jsonify({"success": False, "message": "Version number required"}), 400
@@ -196,9 +202,26 @@ def set_version():
     }
     
     if code_content:
-        update_data['code_content'] = code_content
-        # Auto-set download URL to this server
-        update_data['download_url'] = f"{request.url_root.rstrip('/')}/update/script"
+        try:
+            # Decode base64 to binary
+            binary_data = base64.b64decode(code_content)
+            
+            # 安全策: 1MB未満のEXEは破損とみなして拒否
+            if filename.lower().endswith('.exe') and len(binary_data) < 1000000:
+                return jsonify({"success": False, "message": "ファイルサイズが小さすぎます（破損の可能性）。31MB程度の正常なEXEを選択してください。"}), 400
+            
+            # Store in GridFS
+            # Delete old update files to save space
+            for old_file in fs.find({"type": "update_file"}):
+                fs.delete(old_file._id)
+            
+            file_id = fs.put(binary_data, filename=filename, type="update_file")
+            update_data['filename'] = filename
+            update_data['gridfs_id'] = str(file_id)
+            # Auto-set download URL to this server
+            update_data['download_url'] = f"{request.url_root.rstrip('/')}/update/script"
+        except Exception as e:
+            return jsonify({"success": False, "message": f"ファイルの保存に失敗しました: {str(e)}"}), 500
 
     settings_coll.update_one(
         {"type": "version"},
@@ -211,18 +234,32 @@ def set_version():
 def get_update_script():
     try:
         settings = settings_coll.find_one({"type": "version"})
-        if not settings or 'code_content' not in settings:
-            return "No update script found", 404
+        if not settings:
+            return "No update info found", 404
+            
+        filename = settings.get('filename', 'lag_switch.py')
         
-        # Return as downloadable file
-        from flask import Response
+        if 'gridfs_id' in settings and settings.get('gridfs_id'):
+            file_data = fs.get(ObjectId(settings['gridfs_id']))
+            binary_data = file_data.read()
+            filename = file_data.filename
+        elif 'code_content' in settings:
+            # Fallback for old style (small files < 16MB)
+            content = settings['code_content']
+            try:
+                binary_data = base64.b64decode(content)
+            except:
+                binary_data = content.encode('utf-8')
+        else:
+            return "No update content found", 404
+        
         return Response(
-            settings['code_content'],
-            mimetype="text/x-python",
-            headers={"Content-disposition": "attachment; filename=lag_switch.py"}
+            binary_data,
+            mimetype="application/octet-stream",
+            headers={"Content-disposition": f"attachment; filename={filename}"}
         )
     except Exception as e:
         return str(e), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=os.environ.get("PORT", 5000))
