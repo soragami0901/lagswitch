@@ -176,6 +176,7 @@ def get_version():
     })
 
 @app.route('/admin/set_version', methods=['POST'])
+def set_version():
     data = request.json
     version_number = data.get('version_number')
     download_url = data.get('download_url')
