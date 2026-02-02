@@ -9,6 +9,7 @@ from flask_cors import CORS
 from bson import ObjectId
 
 app = Flask(__name__)
+CORS(app)
 
 # MongoDB Connection
 MONGO_URI = os.environ.get('MONGO_URI')
@@ -38,23 +39,22 @@ def check_db_connection():
 
 def get_settings():
     """設定情報を取得（なければデフォルトを返す）"""
-    try:
-        settings = settings_coll.find_one({"type": "version"})
-        if not settings:
-            default_settings = {
-                "type": "version",
-                "number": "9.0",
-                "download_url": "",
-                "release_notes": "Database Migrated",
-                "force_update": False,
-                "released_at": datetime.datetime.now().isoformat()
-            }
+    settings = settings_coll.find_one({"type": "version"})
+    if not settings:
+        default_settings = {
+            "type": "version",
+            "number": "9.0",
+            "download_url": "",
+            "release_notes": "Database Migrated",
+            "force_update": False,
+            "released_at": datetime.datetime.now().isoformat()
+        }
+        try:
             settings_coll.insert_one(default_settings)
-            return default_settings
-        return settings
-    except Exception as e:
-        print(f"Database error in get_settings: {e}")
-        return {}
+        except Exception as e:
+            print(f"Failed to insert default settings: {e}")
+        return default_settings
+    return settings
 
 @app.route('/verify', methods=['POST'])
 def verify_key():
@@ -172,13 +172,21 @@ def list_keys():
 
 @app.route('/version', methods=['GET'])
 def get_version():
-    settings = get_settings()
-    return jsonify({
-        "number": settings.get('number', '9.0'),
-        "download_url": settings.get('download_url', ''),
-        "release_notes": settings.get('release_notes', ''),
-        "force_update": settings.get('force_update', False)
-    })
+    try:
+        # 明示的に接続確認
+        if not check_db_connection():
+            return jsonify({"success": False, "message": "Database unavailable"}), 503
+            
+        settings = get_settings()
+        return jsonify({
+            "number": settings.get('number', '9.0'),
+            "download_url": settings.get('download_url', ''),
+            "release_notes": settings.get('release_notes', ''),
+            "force_update": settings.get('force_update', False)
+        })
+    except Exception as e:
+        print(f"Error in get_version: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route('/admin/set_version', methods=['POST'])
 def set_version():
