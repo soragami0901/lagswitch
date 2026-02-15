@@ -9,6 +9,10 @@ from flask_cors import CORS
 from bson import ObjectId
 
 app = Flask(__name__)
+@app.route('/', methods=['GET'])
+def health_check():
+    return "OK", 200
+    
 CORS(app)
 
 # MongoDB Connection
@@ -271,3 +275,4 @@ def get_update_script():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=os.environ.get("PORT", 5000))
+
