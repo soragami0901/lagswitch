@@ -9,11 +9,8 @@ from flask_cors import CORS
 from bson import ObjectId
 
 app = Flask(__name__)
-@app.route('/', methods=['GET'])
-def health_check():
-    return "OK", 200
-    
 CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB アップロード上限
 
 # MongoDB Connection
 MONGO_URI = os.environ.get('MONGO_URI')
@@ -218,9 +215,9 @@ def set_version():
             # Decode base64 to binary
             binary_data = base64.b64decode(code_content)
             
-            # 安全策: 1MB未満のEXEは破損とみなして拒否
-            if filename.lower().endswith('.exe') and len(binary_data) < 1000000:
-                return jsonify({"success": False, "message": "ファイルサイズが小さすぎます（破損の可能性）。31MB程度の正常なEXEを選択してください。"}), 400
+            # 安全策: 20MB未満のEXEは破損とみなして拒否
+            if filename.lower().endswith('.exe') and len(binary_data) < 20000000:
+                return jsonify({"success": False, "message": "ファイルサイズが小さすぎます（破損の可能性）。"}), 400
             
             # Store in GridFS
             # Delete old update files to save space
@@ -275,4 +272,3 @@ def get_update_script():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=os.environ.get("PORT", 5000))
-
